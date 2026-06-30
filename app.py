@@ -765,32 +765,38 @@ def send_email_notification(
 
 
 def make_slack_text(missing: pd.DataFrame) -> str:
+
     if missing.empty:
-        return "✅ *No Missing Orders Found*"
+        return "✅ No Missing Orders Found."
 
-    lines = [
-        "📦 *Shopee PH - Missing Orders Dashboard*",
-        "```",
-        f"{'Type':<22} | {'Order':<14} | {'Order Date':<18} | {'Status':<8} | {'Payment':<22} | {'Tracking'}",
-        "-" * 110,
-    ]
+    lines = []
 
-    for _, row in missing.iterrows():
-        payment = str(row["Payment Status"])
-        payment = payment[:20]
+    # Group by Marketplace
+    for marketplace, df in missing.groupby("Marketplace"):
 
-        tracking = row["Tracking"] if row["Tracking"] else "-"
-
+        lines.append(f"📦 *{marketplace}*")
+        lines.append("```")
         lines.append(
-            f"{'🚨 Order Missing':<22} | "
-            f"{str(row['Order'])[:14]:<14} | "
-            f"{str(row['Order Date'])[:18]:<18} | "
-            f"{str(row['Status'])[:8]:<8} | "
-            f"{payment:<22} | "
-            f"{tracking}"
+            f"{'Type':<22} | {'Order':<15} | {'Order Date':<18} | {'Status':<8} | {'Payment':<18} | {'Tracking'}"
         )
+        lines.append("-" * 115)
 
-    lines.append("```")
+        for _, row in df.iterrows():
+
+            payment = row["Payment Status"] if row["Payment Status"] else "-"
+            tracking = row["Tracking"] if row["Tracking"] else "-"
+
+            lines.append(
+                f"{row['Type'][:22]:<22} | "
+                f"{str(row['Order'])[:15]:<15} | "
+                f"{str(row['Order Date'])[:18]:<18} | "
+                f"{str(row['Status'])[:8]:<8} | "
+                f"{payment[:18]:<18} | "
+                f"{tracking}"
+            )
+
+        lines.append("```")
+        lines.append("")
 
     return "\n".join(lines)
 
