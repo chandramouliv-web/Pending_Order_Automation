@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import io
@@ -500,10 +499,12 @@ def build_summary(cleaned: pd.DataFrame) -> tuple[dict[str, int], pd.DataFrame]:
     if cleaned.empty:
         return {"breached": 0, "today": 0, "new_oms": 0, "not_oms": 0, "within": 0}, pd.DataFrame()
 
-    urgent_mask = cleaned["SLA Status"].isin(["Critical - Ship ASAP", "Need to Ship by Today"])
-    breached_mask = cleaned["SLA Status"] == "BREACHED"
-    not_oms_mask = cleaned["OMS status"].str.lower().str.contains("not reflected", na=False)
-    new_oms_mask = cleaned["OMS status"].str.lower().str.contains("new", na=False)
+    summary_source = cleaned.drop_duplicates(subset=["order_number"])
+
+    urgent_mask = summary_source["SLA Status"].isin(["Critical - Ship ASAP", "Need to Ship by Today"])
+    breached_mask = summary_source["SLA Status"] == "BREACHED"
+    not_oms_mask = summary_source["OMS status"].str.lower().str.contains("not reflected", na=False)
+    new_oms_mask = summary_source["OMS status"].str.lower().str.contains("new", na=False)
     counts = {
         "breached": int(breached_mask.sum()),
         "today": int(urgent_mask.sum()),
@@ -512,14 +513,14 @@ def build_summary(cleaned: pd.DataFrame) -> tuple[dict[str, int], pd.DataFrame]:
         "within": int((~breached_mask & ~urgent_mask).sum()),
     }
 
-    pivot_source = cleaned.copy()
+    pivot_source = cleaned.drop_duplicates(subset=["order_number"]).copy()
     pivot_source["SLA Date"] = pivot_source["MP SLA"].apply(format_date)
     pivot = pd.pivot_table(
         pivot_source,
-        values="Order X SKU",
+        values="order_number",
         index=["Marketplace", "OMS status"],
         columns="SLA Date",
-        aggfunc="count",
+        aggfunc="nunique",
         fill_value=0,
         margins=True,
         margins_name="Grand Total",
@@ -664,7 +665,7 @@ def make_details_table_html(cleaned: pd.DataFrame, limit: int = 80) -> str:
         "SLA Status",
     ]
     existing_columns = [column for column in detail_columns if column in cleaned.columns]
-    detail_rows = cleaned[existing_columns].head(limit)
+    detail_rows = cleaned.drop_duplicates(subset=["order_number"])[existing_columns].head(limit)
 
     html = """
     <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Consolas,monospace;font-size:11px;margin-top:18px;">
@@ -765,55 +766,33 @@ def send_email_notification(
             smtp.send_message(message, to_addrs=recipients)
 
 
-def make_slack_text(missing: pd.DataFrame) -> str:
+def make_slack_text(counts: dict[str, int], cleaned: pd.DataFrame, missing: pd.DataFrame) -> str:
+    lines = [
+        "*PUMA SG Pending Order Report*",
+        f"Breached: *{counts['breached']}*",
+        f"Ship Today / Critical: *{counts['today']}*",
+        f"Order Status at NEW: *{counts.get('new_oms', 0)}*",
+        f"Not Reflected in OMS: *{counts['not_oms']}*",
+        f"Within SLA: *{counts['within']}*",
+        f"Unique Pending Orders: *{cleaned['order_number'].nunique()}*",
+        f"Missing rows: *{len(missing)}*",
+    ]
 
-    if missing.empty:
-        return "✅ No Missing Orders Found."
-
-    lines = []
-
-    for marketplace, df in missing.groupby("Marketplace"):
-
-        lines.append(f"📦 *{marketplace}*")
-        lines.append("```")
-
-        cols = [
-            ("Type", "Type"),
-            ("Order", "Order"),
-            ("Order Date", "Order Date"),
-            ("Status", "Status"),
-            ("Payment", "Payment Status"),
-            ("Tracking", "Tracking"),
-        ]
-
-        # Auto-calculate column widths
-        widths = {}
-        for title, col in cols:
-            max_len = max(
-                len(title),
-                *(len(str(v)) for v in df[col].fillna("-").astype(str))
-            )
-            widths[title] = min(max_len + 2, 35)   # Max width = 35 chars
-
-        # Header
-        header = " ".join(
-            f"{title:<{widths[title]}}" for title, _ in cols
-        )
-        lines.append(header)
-        lines.append("-" * len(header))
-
-        # Rows
-        for _, row in df.iterrows():
-            row_text = " ".join(
-                f"{str(row[col])[:widths[title]-2]:<{widths[title]}}"
-                for title, col in cols
-            )
-            lines.append(row_text)
-
-        lines.append("```")
+    urgent = cleaned[cleaned["SLA Status"].isin(["BREACHED", "Critical - Ship ASAP", "Need to Ship by Today"])]
+    if not urgent.empty:
         lines.append("")
+        lines.append("*Top urgent orders*")
+        for _, row in urgent.head(10).iterrows():
+            lines.append(
+                f"- {row['Marketplace']} | {row['order_number']} | {row['custom_sku']} | "
+                f"{row['SLA Status']} | OMS: {row['OMS status'] or '-'}"
+            )
+
+    if len(urgent) > 10:
+        lines.append(f"...and {len(urgent) - 10} more urgent rows in the workbook.")
 
     return "\n".join(lines)
+
 
 def send_slack_notification(webhook_url: str, text: str) -> None:
     payload = json.dumps({"text": text}).encode("utf-8")
@@ -1019,8 +998,8 @@ def main() -> None:
                 )
                 slack_text = st.text_area(
                     "Message preview",
-                    value=make_slack_text(missing),
-                    height=400,
+                    value=make_slack_text(counts, cleaned, missing),
+                    height=260,
                 )
                 if st.button("Send Slack Notification", type="primary", use_container_width=True):
                     if not slack_webhook:
