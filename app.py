@@ -1013,7 +1013,7 @@ def main() -> None:
                         st.error("Slack webhook URL is required.")
                     else:
                         try:
-                            send_slack_notification(slack_webhook, slack_text(missing))
+                            send_slack_notification(slack_webhook, slack_text)
                             st.success("Slack notification sent.")
                         except Exception as exc:
                             st.error(f"Slack notification failed: {exc}")
