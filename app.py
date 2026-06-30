@@ -1054,3 +1054,29 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# === Improved Slack notification helper ===
+def make_missing_orders_slack(missing):
+    if missing.empty:
+        return "✅ No Missing Orders found."
+
+    lines = ["🚨 *Missing Orders in OMS*",
+             f"*Total Missing Orders:* {len(missing)}",
+             "```",
+             f"{'Type':24} {'Order':18} {'Status':10} {'Payment':22} {'Tracking':12}",
+             "-"*95]
+    for _, row in missing.head(20).iterrows():
+        payment = row.get("Payment Method","") or row.get("Payment Status","")
+        lines.append(
+            f"{str(row.get('Type',''))[:24]:24}"
+            f"{str(row.get('Order',''))[:18]:18}"
+            f"{str(row.get('Status',''))[:10]:10}"
+            f"{str(payment)[:22]:22}"
+            f"{str(row.get('Tracking','-'))[:12]:12}"
+        )
+    lines.append("```")
+    if len(missing) > 20:
+        lines.append(f"...and {len(missing)-20} more orders.")
+    return "\n".join(lines)
+
