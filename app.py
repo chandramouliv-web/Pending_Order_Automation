@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 CLEANED_HEADERS = [
@@ -646,8 +647,60 @@ def make_dashboard_html(counts: dict[str, int], pivot: pd.DataFrame) -> str:
     """
 
 
-def make_email_html(counts: dict[str, int], pivot: pd.DataFrame) -> str:
+def make_details_table_html(cleaned: pd.DataFrame, limit: int = 80) -> str:
+    if cleaned.empty:
+        return "<p>No pending order details generated.</p>"
+
+    detail_columns = [
+        "Marketplace",
+        "order_number",
+        "custom_sku",
+        "MP Status",
+        "MP SLA",
+        "OMS status",
+        "SLA Status",
+    ]
+    existing_columns = [column for column in detail_columns if column in cleaned.columns]
+    detail_rows = cleaned[existing_columns].head(limit)
+
+    html = """
+    <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Consolas,monospace;font-size:11px;margin-top:18px;">
+      <tr>
+    """
+    for column in existing_columns:
+        html += f'<td style="border:1px solid #d9d9d9;background:#1f2937;color:#ffffff;padding:7px 10px;font-weight:bold;">{column}</td>'
+    html += "</tr>"
+
+    for _, row in detail_rows.iterrows():
+        status = row.get("SLA Status", "")
+        if status == "BREACHED":
+            bg, color = "#ffe4e6", "#991b1b"
+        elif status == "Critical - Ship ASAP":
+            bg, color = "#ffedd5", "#7c2d12"
+        elif status == "Need to Ship by Today":
+            bg, color = "#fff7ed", "#9a3412"
+        elif status == "Ship by Tomorrow":
+            bg, color = "#e0f2fe", "#075985"
+        else:
+            bg, color = "#f0fdf4", "#14532d"
+
+        html += "<tr>"
+        for column in existing_columns:
+            html += (
+                f'<td style="border:1px solid #d9d9d9;background:{bg};color:{color};'
+                f'padding:7px 10px;font-weight:bold;">{row.get(column, "")}</td>'
+            )
+        html += "</tr>"
+
+    html += "</table>"
+    if len(cleaned) > limit:
+        html += f"<p style='font-family:Arial,sans-serif;font-size:12px;'>Showing first {limit} rows. Full details are in the attached workbook.</p>"
+    return html
+
+
+def make_email_html(counts: dict[str, int], pivot: pd.DataFrame, cleaned: pd.DataFrame) -> str:
     dashboard_html = make_dashboard_html(counts, pivot)
+    details_html = make_details_table_html(cleaned)
     return f"""
     <html>
       <body style="font-family: Arial, sans-serif; font-size: 13px; color: #17202a;">
@@ -655,6 +708,8 @@ def make_email_html(counts: dict[str, int], pivot: pd.DataFrame) -> str:
         <p>Find the attached Pending Orders Report. Kindly ensure all orders are processed and shipped on time to avoid cancellations.</p>
         <p>Below are orders that require immediate attention:</p>
         {dashboard_html}
+        <p style="margin-top:18px;font-weight:bold;">Pending Order Details</p>
+        {details_html}
         <p>Please prioritize shipping to avoid cancellations.</p>
         <p>Thanks,<br>Graas Team</p>
       </body>
@@ -921,7 +976,7 @@ def main() -> None:
                                 to_emails=to_emails,
                                 cc_emails=cc_emails,
                                 subject=subject,
-                                html_body=make_email_html(counts, pivot),
+                                html_body=make_email_html(counts, pivot, cleaned),
                                 attachment_bytes=xlsx,
                                 attachment_name=report_filename,
                                 use_ssl=use_ssl,
@@ -959,7 +1014,9 @@ def main() -> None:
         if pivot.empty:
             st.info("Run automation to see the dashboard.")
         else:
-            st.markdown(make_dashboard_html(counts, pivot), unsafe_allow_html=True)
+            components.html(make_dashboard_html(counts, pivot), height=520, scrolling=True)
+            with st.expander("Pending Order Details Preview"):
+                st.dataframe(cleaned, use_container_width=True, height=420)
 
     with tabs[1]:
         st.subheader("TC Cleaned")
