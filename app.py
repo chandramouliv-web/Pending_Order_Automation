@@ -764,30 +764,33 @@ def send_email_notification(
             smtp.send_message(message, to_addrs=recipients)
 
 
-def make_slack_text(counts: dict[str, int], cleaned: pd.DataFrame, missing: pd.DataFrame) -> str:
+def make_slack_text(missing: pd.DataFrame) -> str:
+    if missing.empty:
+        return "✅ *No Missing Orders Found*"
+
     lines = [
-        "*PUMA SG Pending Order Report*",
-        f"Breached: *{counts['breached']}*",
-        f"Ship Today / Critical: *{counts['today']}*",
-        f"Order Status at NEW: *{counts.get('new_oms', 0)}*",
-        f"Not Reflected in OMS: *{counts['not_oms']}*",
-        f"Within SLA: *{counts['within']}*",
-        f"Pending rows: *{len(cleaned)}*",
-        f"Missing rows: *{len(missing)}*",
+        "📦 *Shopee PH - Missing Orders Dashboard*",
+        "```",
+        f"{'Type':<22} | {'Order':<14} | {'Order Date':<18} | {'Status':<8} | {'Payment':<22} | {'Tracking'}",
+        "-" * 110,
     ]
 
-    urgent = cleaned[cleaned["SLA Status"].isin(["BREACHED", "Critical - Ship ASAP", "Need to Ship by Today"])]
-    if not urgent.empty:
-        lines.append("")
-        lines.append("*Top urgent orders*")
-        for _, row in urgent.head(10).iterrows():
-            lines.append(
-                f"- {row['Marketplace']} | {row['order_number']} | {row['custom_sku']} | "
-                f"{row['SLA Status']} | OMS: {row['OMS status'] or '-'}"
-            )
+    for _, row in missing.iterrows():
+        payment = str(row["Payment Status"])
+        payment = payment[:20]
 
-    if len(urgent) > 10:
-        lines.append(f"...and {len(urgent) - 10} more urgent rows in the workbook.")
+        tracking = row["Tracking"] if row["Tracking"] else "-"
+
+        lines.append(
+            f"{'🚨 Order Missing':<22} | "
+            f"{str(row['Order'])[:14]:<14} | "
+            f"{str(row['Order Date'])[:18]:<18} | "
+            f"{str(row['Status'])[:8]:<8} | "
+            f"{payment:<22} | "
+            f"{tracking}"
+        )
+
+    lines.append("```")
 
     return "\n".join(lines)
 
@@ -996,15 +999,15 @@ def main() -> None:
                 )
                 slack_text = st.text_area(
                     "Message preview",
-                    value=make_slack_text(counts, cleaned, missing),
-                    height=260,
+                    value=make_slack_text(missing),
+                    height=400,
                 )
                 if st.button("Send Slack Notification", type="primary", use_container_width=True):
                     if not slack_webhook:
                         st.error("Slack webhook URL is required.")
                     else:
                         try:
-                            send_slack_notification(slack_webhook, slack_text)
+                            send_slack_notification(slack_webhook, slack_text(missing))
                             st.success("Slack notification sent.")
                         except Exception as exc:
                             st.error(f"Slack notification failed: {exc}")
