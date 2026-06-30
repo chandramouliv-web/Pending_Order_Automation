@@ -771,35 +771,48 @@ def make_slack_text(missing: pd.DataFrame) -> str:
 
     lines = []
 
-    # Group by Marketplace
     for marketplace, df in missing.groupby("Marketplace"):
 
         lines.append(f"📦 *{marketplace}*")
         lines.append("```")
-        lines.append(
-            f"{'Type':<22} | {'Order':<15} | {'Order Date':<18} | {'Status':<8} | {'Payment':<18} | {'Tracking'}"
-        )
-        lines.append("-" * 115)
 
-        for _, row in df.iterrows():
+        cols = [
+            ("Type", "Type"),
+            ("Order", "Order"),
+            ("Order Date", "Order Date"),
+            ("Status", "Status"),
+            ("Payment", "Payment Status"),
+            ("Tracking", "Tracking"),
+        ]
 
-            payment = row["Payment Status"] if row["Payment Status"] else "-"
-            tracking = row["Tracking"] if row["Tracking"] else "-"
-
-            lines.append(
-                f"{row['Type'][:22]:<22} | "
-                f"{str(row['Order'])[:15]:<15} | "
-                f"{str(row['Order Date'])[:18]:<18} | "
-                f"{str(row['Status'])[:8]:<8} | "
-                f"{payment[:18]:<18} | "
-                f"{tracking}"
+        # Auto-calculate column widths
+        widths = {}
+        for title, col in cols:
+            max_len = max(
+                len(title),
+                *(len(str(v)) for v in df[col].fillna("-").astype(str))
             )
+            widths[title] = min(max_len + 2, 35)   # Max width = 35 chars
+
+        # Header
+        header = " ".join(
+            f"{title:<{widths[title]}}" for title, _ in cols
+        )
+        lines.append(header)
+        lines.append("-" * len(header))
+
+        # Rows
+        for _, row in df.iterrows():
+            row_text = " ".join(
+                f"{str(row[col])[:widths[title]-2]:<{widths[title]}}"
+                for title, col in cols
+            )
+            lines.append(row_text)
 
         lines.append("```")
         lines.append("")
 
     return "\n".join(lines)
-
 
 def send_slack_notification(webhook_url: str, text: str) -> None:
     payload = json.dumps({"text": text}).encode("utf-8")
