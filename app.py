@@ -571,6 +571,16 @@ def make_dashboard_html(counts: dict[str, int], pivot: pd.DataFrame) -> str:
         """
     else:
         display_pivot = pivot.copy()
+        date_cols=[c for c in display_pivot.columns if c!="Grand Total"]
+        date_cols=sorted(date_cols,key=lambda x: datetime.strptime(str(x),"%d-%b-%Y"))
+        display_pivot=display_pivot[date_cols+["Grand Total"]]
+        df=display_pivot.reset_index()
+        mp_order=["Lazada SG","Shopee SG","Zalora SG","Grand Total"]
+        oms_order=["Not Reflected in OMS","NEW","PROCESSING","PACKED","READY_TO_SHIP","PICKING","IN_PROGRESS","Grand Total"]
+        df["Marketplace"]=pd.Categorical(df["Marketplace"],categories=mp_order,ordered=True)
+        df["OMS status"]=pd.Categorical(df["OMS status"],categories=oms_order,ordered=True)
+        df=df.sort_values(["Marketplace","OMS status"])
+        display_pivot=df.set_index(["Marketplace","OMS status"])
         dashboard_table = """
         <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Consolas,monospace;font-size:11px;text-align:center;">
           <tr>
